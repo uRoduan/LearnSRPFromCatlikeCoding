@@ -14,6 +14,10 @@ Shader "Custom RP/Unlit" {
 	CustomEditor "CustomShaderGUI"
 	
 	SubShader {
+		HLSLINCLUDE
+		#include "../ShaderLibrary/Common.hlsl"
+		#include  "UnlitInput.hlsl"
+		ENDHLSL
 		
 		Pass 
 		{
