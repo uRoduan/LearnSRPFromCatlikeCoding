@@ -21,6 +21,8 @@ public class CustomShaderGUI : ShaderGUI
         m_editor = materialEditor;
         m_materials = materialEditor.targets;
         m_properties = properties;
+
+        BakeEmission();
         
         EditorGUILayout.Space();
         m_showPresets = EditorGUILayout.Foldout(m_showPresets, "Presets", true);
@@ -33,6 +35,37 @@ public class CustomShaderGUI : ShaderGUI
         }
         if (EditorGUI.EndChangeCheck()) {
             SetShadowCasterPass();
+            CopyLightMappingProperties();
+        }
+    }
+
+    private void CopyLightMappingProperties()
+    {
+        MaterialProperty mainTex = FindProperty("_MainTex", m_properties, false);
+        MaterialProperty baseMap = FindProperty("_BaseMap", m_properties, false);
+        if (mainTex != null && baseMap != null)
+        {
+            mainTex.textureValue = baseMap.textureValue;
+            mainTex.textureScaleAndOffset = baseMap.textureScaleAndOffset;
+        }
+        MaterialProperty color = FindProperty("_Color", m_properties, false);
+        MaterialProperty baseColor = FindProperty("_BaseColor", m_properties, false);
+        if (color != null && baseColor != null)
+        {
+            color.colorValue = baseColor.colorValue;
+        }
+    }
+
+    private void BakeEmission()
+    {
+        EditorGUI.BeginChangeCheck();
+        m_editor.LightmapEmissionProperty();
+        if (EditorGUI.EndChangeCheck())
+        {
+            foreach (Material m in m_editor.targets)
+            {
+                m.globalIlluminationFlags &= ~MaterialGlobalIlluminationFlags.EmissiveIsBlack;
+            }
         }
     }
 

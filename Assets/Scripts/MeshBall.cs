@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering;
 using Random = UnityEngine.Random;
 
 public class MeshBall : MonoBehaviour
@@ -25,6 +26,9 @@ public class MeshBall : MonoBehaviour
 
     [SerializeField] 
     private Material _material = default;
+
+    [SerializeField] 
+    private LightProbeProxyVolume _lightProbeVolume = null;
 
     private void Awake()
     {
@@ -58,6 +62,26 @@ public class MeshBall : MonoBehaviour
 			m_block.SetFloatArray(s_metallicId, m_metallic);
 			m_block.SetFloatArray(s_smoothnessId, m_smoothness);
         }
-        Graphics.DrawMeshInstanced(_mesh, 0, _material, m_matrices, MAX_INSTANCE_COUNT, m_block);
+
+        if(!_lightProbeVolume)
+        {
+            var positions = new Vector3[1023];
+            for (int i = 0; i < m_matrices.Length; i++)
+            {
+                positions[i] = m_matrices[i].GetColumn(3);
+            }
+
+            var lightProbes = new SphericalHarmonicsL2[1023];
+            var occlusionProbes = new Vector4[1023];
+            LightProbes.CalculateInterpolatedLightAndOcclusionProbes(positions, lightProbes, occlusionProbes);
+            m_block.CopySHCoefficientArraysFrom(lightProbes);
+            m_block.CopyProbeOcclusionArrayFrom(occlusionProbes);
+        }
+        
+        Graphics.DrawMeshInstanced(_mesh, 0, _material, m_matrices, MAX_INSTANCE_COUNT, m_block,
+            //shadow casting mode, receive shadows, layer, null means all camera,
+            //use LightProbeUsage.CustomProvided because there isn't a single position that can be used to blend probes.
+            ShadowCastingMode.On, true, 0, null,
+            _lightProbeVolume ? LightProbeUsage.UseProxyVolume : LightProbeUsage.CustomProvided, _lightProbeVolume);
     }
 }

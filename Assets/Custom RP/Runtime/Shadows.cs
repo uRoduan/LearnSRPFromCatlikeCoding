@@ -27,6 +27,12 @@ public class Shadows
         "_CASCADE_BLEND_DITHER"
     };
 
+    private string[] s_shadowMaskKeywords =
+    {
+        "_SHADOW_MASK_ALWAYS",
+        "_SHADOW_MASK_DISTANCE"
+    };
+
     private static readonly int 
         DirShadowAtlasId = Shader.PropertyToID("_DirectionalShadowAtlas"),
         DirShadowMatricesId = Shader.PropertyToID("_DirectionalShadowMatrices"),
@@ -58,6 +64,8 @@ public class Shadows
         new ShadowedDirectionalLight[MaxShadowedDirectionalLightCount];
 
     private int m_shadowedDirectionalLightCount;
+
+    private bool m_useShadowMask;
     public void Setup(ScriptableRenderContext context, CullingResults cullingResults, ShadowSettings settings)
     {
         m_context = context;
@@ -65,9 +73,11 @@ public class Shadows
         m_settings = settings;
 
         m_shadowedDirectionalLightCount = 0;
+
+        m_useShadowMask = false;
     }
 
-    public Vector3 ReserveDirectionalShadows(Light light, int visibleLightIndex)
+    public Vector4 ReserveDirectionalShadows(Light light, int visibleLightIndex)
     {
         //Besides that, it's possible that a visible light ends up not affecting any objects that cast shadows,
         //either because they're configured not to or because the light only affects objects beyond the max shadow distance.
@@ -75,22 +85,34 @@ public class Shadows
         //It has a second output parameter for the bounds—which we don't need—and returns whether the bounds are valid.
         //If not the there are no shadows to render for this light and it should be ignored.
         if (m_shadowedDirectionalLightCount < MaxShadowedDirectionalLightCount &&
-            light.shadows != LightShadows.None && light.shadowStrength > 0f && 
-            m_cullingResults.GetShadowCasterBounds(visibleLightIndex, out _))
+            light.shadows != LightShadows.None && light.shadowStrength > 0f)
         {
+            float maskChannel = -1;
+            LightBakingOutput lightBaking = light.bakingOutput;
+            if (lightBaking.lightmapBakeType == LightmapBakeType.Mixed &&
+                lightBaking.mixedLightingMode == MixedLightingMode.Shadowmask)
+            {
+                m_useShadowMask = true;
+                maskChannel = lightBaking.occlusionMaskChannel;
+            }
+
+            if (!m_cullingResults.GetShadowCasterBounds(visibleLightIndex, out _))
+            {
+                return new Vector4(-light.shadowStrength, 0f, 0f, maskChannel); //negative for baked shadow, prevent to sample from shadow map
+            }
             m_shadowedDirectionalLights[m_shadowedDirectionalLightCount] = new ShadowedDirectionalLight
             {
                 VisibleLightIndex = visibleLightIndex,
                 SlopeScaleBias = light.shadowBias,
                 NearPlaneOffset = light.shadowNearPlane
             };
-            return new Vector3(
+            return new Vector4(
                 light.shadowStrength,
                 m_settings._directional._cascadeCount * m_shadowedDirectionalLightCount++,
-                light.shadowNormalBias);
+                light.shadowNormalBias, maskChannel);
         }
         
-        return Vector3.zero;
+        return new Vector4(0f, 0f, 0f, -1f);
     }
 
     private void ExecuteBuffer()
@@ -114,6 +136,10 @@ public class Shadows
                 32, FilterMode.Bilinear, RenderTextureFormat.Shadowmap
                 );
         }
+        m_buffer.BeginSample(BufferName);
+        SetKeywords(s_shadowMaskKeywords, m_useShadowMask ? QualitySettings.shadowmaskMode == ShadowmaskMode.Shadowmask ? 0 : 1 :-1);
+        m_buffer.EndSample(BufferName);
+        ExecuteBuffer();
     }
 
     private void RenderDirectionalShadows()

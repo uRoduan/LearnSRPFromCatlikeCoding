@@ -21,6 +21,14 @@ struct DirectionalShadowData {
     float strength;
     int tileIndex;
 	float normalBias;
+    int shadowMaskChannel;
+};
+
+struct ShadowMask
+{
+    bool always;
+    bool distance;
+    float4 shadows;
 };
 
 struct ShadowData
@@ -28,6 +36,7 @@ struct ShadowData
     int cascadeIndex;
     float cascadeBlend;
     float strength;
+    ShadowMask shadowMask;
 };
 
 TEXTURE2D_SHADOW(_DirectionalShadowAtlas);
@@ -51,6 +60,8 @@ inline float FadedShadowStrength (float distance, float scale, float fade)
 ShadowData GetShadowData(Surface surfaceWS)
 {
     ShadowData data;
+    data.shadowMask.distance = false;
+    data.shadowMask.shadows = 1.0;
     data.cascadeBlend = 1.0;
     data.strength = FadedShadowStrength(
         surfaceWS.depth, _ShadowDistanceFade.x, _ShadowDistanceFade.y
@@ -116,15 +127,8 @@ float FilterDirectionalShadow (float3 positionSTS) {
     #endif
 }
 
-
-float GetDirectionalShadowAttenuation(DirectionalShadowData directional, ShadowData global, Surface surfaceWS)
+float GetCascadeShadow(DirectionalShadowData directional, ShadowData global, Surface surfaceWS)
 {
-    #if !defined(_RECEIVE_SHADOWS)
-        return 1.0;
-    #endif
-    if (directional.strength <= 0.0) { // data.strength is same in all fragment, so it will not slow down the shading.
-        return 1.0;
-    }
     float3 normalBias = surfaceWS.normal * (directional.normalBias * _CascadeData[global.cascadeIndex].y);
     float3 positionSTS = mul(
         _DirectionalShadowMatrices[directional.tileIndex], float4(surfaceWS.position + normalBias, 1.0)
@@ -140,8 +144,66 @@ float GetDirectionalShadowAttenuation(DirectionalShadowData directional, ShadowD
             FilterDirectionalShadow(positionSTS), shadow, global.cascadeBlend
         );
     }
-    return lerp(1.0, shadow, directional.strength);// when strength is 0, shadow does not affect lighting
+    return shadow;
 }
+
+float GetBakedShadow (ShadowMask shadowMask, int channel)
+{
+    float shadow = 1.0;
+    if(shadowMask.distance || shadowMask.always)
+    {
+        if(channel >= 0)
+        shadow = shadowMask.shadows[channel];
+    }
+    return shadow;
+}
+
+float GetBakedShadow (ShadowMask shadowMask, int channel, float strength)
+{
+    if(shadowMask.always || shadowMask.distance)
+    {
+        return lerp(1.0, GetBakedShadow(shadowMask, channel), strength);
+    }
+    return 1.0;
+}
+
+
+
+    
+float MixBakedAndRealtimeShadows(ShadowData global, float shadow, int shadowMaskChannel, float strength)
+{
+    float baked = GetBakedShadow(global.shadowMask, shadowMaskChannel);
+    if(global.shadowMask.always)
+    {
+        shadow = lerp(1.0, shadow, strength);
+        shadow = min(baked, shadow);
+        return lerp(1.0, shadow, strength);
+    }
+    if(global.shadowMask.distance)
+    {
+        shadow = lerp(baked, shadow, global.strength);
+        return lerp(1.0, shadow, strength); // strength is the property of directional light
+    }
+    return lerp(1.0, shadow, strength * global.strength);
+}
+
+
+float GetDirectionalShadowAttenuation(DirectionalShadowData directional, ShadowData global, Surface surfaceWS)
+{
+    #if !defined(_RECEIVE_SHADOWS)
+        return 1.0;
+    #endif
+    float shadow;
+    if (directional.strength * global.strength <= 0.0) { // data.strength is same in all fragment, so it will not slow down the shading.
+        shadow = GetBakedShadow(global.shadowMask, abs(directional.strength));
+    }
+    else{
+        shadow = GetCascadeShadow(directional, global, surfaceWS);
+        shadow = MixBakedAndRealtimeShadows(global, shadow, directional.shadowMaskChannel, directional.strength);
+    }
+    return shadow;// when strength is 0, shadow does not affect lighting
+}
+
 
 
 #endif
